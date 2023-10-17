@@ -10,6 +10,8 @@ use App\Models\Manufacturer;
 use App\Models\Statuslabel;
 use App\Models\Supplier;
 use App\Models\User;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
 
 class ItemImporter extends Importer
 {
@@ -88,8 +90,14 @@ class ItemImporter extends Importer
         }
 
         $this->item['asset_eol_date'] = null;
-        if ($this->findCsvMatch($row, 'asset_eol_date') != '') {
-            $this->item['asset_eol_date'] = date('Y-m-d', strtotime($this->findCsvMatch($row, 'asset_eol_date')));
+            if($this->findCsvMatch($row, 'asset_eol_date') != '') {
+                $csvMatch = $this->findCsvMatch($row, 'asset_eol_date');
+                try {
+                    $this->item['asset_eol_date'] = CarbonImmutable::parse($csvMatch)->format('Y-m-d');
+                } catch (\Exception $e) {
+                    Log::info($e->getMessage());
+                    $this->log('Unable to parse date: '.$csvMatch);
+                }
         }
 
         $this->item['qty'] = $this->findCsvMatch($row, 'quantity');
@@ -112,13 +120,9 @@ class ItemImporter extends Importer
      */
     protected function determineCheckout($row)
     {
+        // Locations don't get checked out to anyone/anything
         if (get_class($this) == LocationImporter::class) {
             return;
-        }
-
-        // We only support checkout-to-location for asset, so short circuit otherwise.
-        if (get_class($this) != AssetImporter::class) {
-            return $this->createOrFetchUser($row);
         }
 
         if (strtolower($this->item['checkout_class']) === 'location' && $this->findCsvMatch($row, 'checkout_location') != null ) {

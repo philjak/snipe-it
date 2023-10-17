@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\Rule;
 use Schema;
 use Watson\Validating\ValidatingTrait;
-
 class CustomField extends Model
 {
     use HasFactory;
@@ -53,6 +52,7 @@ class CustomField extends Model
         'element' => 'required|in:text,listbox,textarea,checkbox,radio',
         'field_encrypted' => 'nullable|boolean',
         'auto_add_to_fieldsets' => 'boolean',
+        'show_in_listview' => 'boolean',
     ];
 
     /**
@@ -71,6 +71,7 @@ class CustomField extends Model
         'is_unique',
         'display_in_user_view',
         'auto_add_to_fieldsets',
+        'show_in_listview',
 
     ];
 
@@ -179,6 +180,11 @@ class CustomField extends Model
     public function fieldset()
     {
         return $this->belongsToMany(\App\Models\CustomFieldset::class);
+    }
+   
+    public function assetModels()
+    {
+       return $this->fieldset()->with('models')->get()->pluck('models')->flatten()->unique('id'); 
     }
 
     /**
@@ -306,9 +312,9 @@ class CustomField extends Model
             $arr_parts = explode('|', $arr[$x]);
             if ($arr_parts[0] != '') {
                 if (array_key_exists('1', $arr_parts)) {
-                    $result[$arr_parts[0]] = $arr_parts[1];
+                    $result[$arr_parts[0]] = trim($arr_parts[1]);
                 } else {
-                    $result[$arr_parts[0]] = $arr_parts[0];
+                    $result[$arr_parts[0]] = trim($arr_parts[0]);
                 }
             }
         }

@@ -72,7 +72,9 @@ class Asset extends Depreciable
 
     protected $casts = [
         'purchase_date' => 'date',
+        'eol_explicit' => 'boolean',
         'last_checkout' => 'datetime',
+        'last_checkin' => 'datetime',
         'expected_checkin' => 'date',
         'last_audit_date' => 'datetime',
         'next_audit_date' => 'date',
@@ -82,7 +84,6 @@ class Asset extends Depreciable
         'location_id'    => 'integer',
         'rtd_company_id' => 'integer',
         'supplier_id'    => 'integer',
-        'byod'           => 'boolean',
         'created_at'     => 'datetime',
         'updated_at'   => 'datetime',
         'deleted_at'  => 'datetime',
@@ -104,7 +105,9 @@ class Asset extends Depreciable
         'serial'          => 'unique_serial|nullable',
         'purchase_cost'   => 'numeric|nullable|gte:0',
         'supplier_id'     => 'exists:suppliers,id|nullable',
-        'asset_eol_date'  => 'date|max:10|min:10|nullable',
+        'asset_eol_date'  => 'date|nullable',
+        'eol_explicit'    => 'boolean|nullable',
+        'byod'            => 'boolean',
     ];
 
   /**
@@ -135,8 +138,10 @@ class Asset extends Depreciable
         'expected_checkin',
         'byod',
         'asset_eol_date',
+        'eol_explicit', 
         'last_audit_date',
         'next_audit_date',
+        'asset_eol_date',
     ];
 
     use Searchable;
@@ -332,6 +337,13 @@ class Asset extends Depreciable
             }
         }
 
+        $originalValues = $this->getRawOriginal();
+
+        // attempt to detect change in value if different from today's date
+        if ($checkout_at && strpos($checkout_at, date('Y-m-d')) === false) {
+            $originalValues['action_date'] = date('Y-m-d H:i:s');
+        }
+
         if ($this->save()) {
             if (is_int($admin)) {
                 $checkedOutBy = User::findOrFail($admin);
@@ -340,7 +352,7 @@ class Asset extends Depreciable
             } else {
                 $checkedOutBy = Auth::user();
             }
-            event(new CheckoutableCheckedOut($this, $target, $checkedOutBy, $note));
+            event(new CheckoutableCheckedOut($this, $target, $checkedOutBy, $note, $originalValues));
 
             $this->increment('checkout_counter', 1);
 
@@ -390,7 +402,7 @@ class Asset extends Depreciable
      */
     public function depreciation()
     {
-        return $this->model->belongsTo(\App\Models\Depreciation::class, 'depreciation_id');
+        return $this->hasOneThrough(\App\Models\Depreciation::class,\App\Models\AssetModel::class,'id','id','model_id','depreciation_id');
     }
 
 
@@ -403,7 +415,7 @@ class Asset extends Depreciable
      */
     public function components()
     {
-        return $this->belongsToMany('\App\Models\Component', 'components_assets', 'asset_id', 'component_id')->withPivot('id', 'assigned_qty', 'created_at')->withTrashed();
+        return $this->belongsToMany('\App\Models\Component', 'components_assets', 'asset_id', 'component_id')->withPivot('id', 'assigned_qty', 'created_at');
     }
 
 
@@ -785,24 +797,17 @@ class Asset extends Depreciable
      * @since [v4.0]
      * @return string | false
      */
-    public static function autoincrement_asset()
+    public static function autoincrement_asset(int $additional_increment = 0)
     {
         $settings = \App\Models\Setting::getSettings();
 
 
         if ($settings->auto_increment_assets == '1') {
-            $temp_asset_tag = \DB::table('assets')
-                ->where('physical', '=', '1')
-                ->max('asset_tag');
-
-            $asset_tag_digits = preg_replace('/\D/', '', $temp_asset_tag);
-            $asset_tag = preg_replace('/^0*/', '', $asset_tag_digits);
-
             if ($settings->zerofill_count > 0) {
-                return $settings->auto_increment_prefix.self::zerofill($settings->next_auto_tag_base, $settings->zerofill_count);
+                return $settings->auto_increment_prefix.self::zerofill($settings->next_auto_tag_base + $additional_increment, $settings->zerofill_count);
             }
 
-            return $settings->auto_increment_prefix.$settings->next_auto_tag_base;
+            return $settings->auto_increment_prefix.($settings->next_auto_tag_base + $additional_increment);
         } else {
             return false;
         }
@@ -947,8 +952,10 @@ class Asset extends Depreciable
                 ->orWhere('assets_users.first_name', 'LIKE', '%'.$term.'%')
                 ->orWhere('assets_users.last_name', 'LIKE', '%'.$term.'%')
                 ->orWhere('assets_users.username', 'LIKE', '%'.$term.'%')
-                ->orWhereRaw('CONCAT('.DB::getTablePrefix().'assets_users.first_name," ",'.DB::getTablePrefix().'assets_users.last_name) LIKE ?', ["%$term%"]);
-
+                ->orWhereMultipleColumns([
+                    'assets_users.first_name',
+                    'assets_users.last_name',
+                ], $term);
         }
 
         /**
@@ -1343,7 +1350,10 @@ class Asset extends Depreciable
                 })->orWhere(function ($query) use ($search) {
                     $query->where('assets_users.first_name', 'LIKE', '%'.$search.'%')
                         ->orWhere('assets_users.last_name', 'LIKE', '%'.$search.'%')
-                        ->orWhereRaw('CONCAT('.DB::getTablePrefix().'assets_users.first_name," ",'.DB::getTablePrefix().'assets_users.last_name) LIKE ?', ["%$search%"])
+                        ->orWhereMultipleColumns([
+                            'assets_users.first_name',
+                            'assets_users.last_name',
+                        ], $search)
                         ->orWhere('assets_users.username', 'LIKE', '%'.$search.'%')
                         ->orWhere('assets_locations.name', 'LIKE', '%'.$search.'%')
                         ->orWhere('assigned_assets.name', 'LIKE', '%'.$search.'%');
@@ -1431,6 +1441,12 @@ class Asset extends Depreciable
 
                 if ($fieldname == 'location') {
                     $query->whereHas('location', function ($query) use ($search_val) {
+                        $query->where('locations.name', 'LIKE', '%'.$search_val.'%');
+                    });
+                }
+
+                if ($fieldname == 'rtd_location') {
+                    $query->whereHas('defaultLoc', function ($query) use ($search_val) {
                         $query->where('locations.name', 'LIKE', '%'.$search_val.'%');
                     });
                 }
@@ -1561,7 +1577,7 @@ class Asset extends Depreciable
     */
     public function scopeOrderModelNumber($query, $order)
     {
-        return $query->join('models', 'assets.model_id', '=', 'models.id')->orderBy('models.model_number', $order);
+        return $query->leftJoin('models as model_number_sort', 'assets.model_id', '=', 'model_number_sort.id')->orderBy('model_number_sort.model_number', $order);
     }
 
 
@@ -1662,7 +1678,7 @@ class Asset extends Depreciable
     public function scopeOrderManufacturer($query, $order)
     {
         return $query->join('models as order_asset_model', 'assets.model_id', '=', 'order_asset_model.id')
-            ->join('manufacturers as manufacturer_order', 'order_asset_model.manufacturer_id', '=', 'manufacturer_order.id')
+            ->leftjoin('manufacturers as manufacturer_order', 'order_asset_model.manufacturer_id', '=', 'manufacturer_order.id')
             ->orderBy('manufacturer_order.name', $order);
     }
 
