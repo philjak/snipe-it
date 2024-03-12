@@ -173,7 +173,7 @@ class AssetPresenter extends Presenter
                 'searchable' => false,
                 'sortable' => true,
                 'visible' => false,
-                'title' => trans('general.eol'),
+                'title' => trans('admin/hardware/form.eol_rate'),
             ],
             [
                 'field' => 'asset_eol_date',
@@ -195,6 +195,14 @@ class AssetPresenter extends Presenter
                 'visible' => false,
                 'title' => trans('admin/hardware/form.warranty_expires'),
                 'formatter' => 'dateDisplayFormatter',
+            ], [
+                'field' => 'requestable',
+                'searchable' => false,
+                'sortable' => true,
+                'visible' => false,
+                'title' => trans('admin/hardware/general.requestable'),
+                'formatter' => 'trueFalseFormatter',
+
             ], [
                 'field' => 'notes',
                 'searchable' => true,
