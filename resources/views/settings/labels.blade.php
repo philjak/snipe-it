@@ -27,11 +27,11 @@
     <div class="row">
         <div class="col-sm-10 col-sm-offset-1 col-md-10">
 
-
             <div class="panel box box-default">
                 <div class="box-header with-border">
                     <h2 class="box-title">
-                        <i class="fas fa-tags"></i> {{ trans('admin/settings/general.labels') }}
+                        <x-icon type="labels"/>
+                        {{ trans('admin/settings/general.labels') }}
                     </h2>
                 </div>
                 <div class="box-body">
@@ -66,10 +66,8 @@
 
                             <!-- Template -->
                             <div class="form-group{{ $errors->has('label2_template') ? ' has-error' : '' }}">
-                                <div class="col-md-3">
-                                    @include('partials.label2-preview')
-                                </div>
-                                <div class="col-md-9">
+
+                                <div class="col-md-9 col-md-offset-3">
                                     <table
                                         data-click-to-select="true"
                                         data-columns="{{ \App\Presenters\LabelPresenter::dataTableLayout() }}"
@@ -92,7 +90,11 @@
                                     ></table>
                                     <script>
                                         document.addEventListener('DOMContentLoaded', () => {
+                                            const chosenLabel = "{{ old('label2_template', $chosenLabel ?? '') }}";
                                             $('#label2TemplateTable').on('load-success.bs.table', (e) => {
+                                                if (chosenLabel) {
+                                                    $('input[name="label2_template"][value="' + chosenLabel + '"]').prop('checked', true);
+                                                }
                                                 let form = document.getElementById('settingsForm');
                                                 form.dispatchEvent(new Event('change'));
                                             });
@@ -145,14 +147,13 @@
                                 <div class="col-md-7">
                                     @php
                                         $select1DValues = [
-                                            'default' => trans('admin/settings/general.default').' [ '.$setting->alt_barcode.' ]',
-                                            'none'    => trans('admin/settings/general.none'),
                                             'C128'    => 'C128',
                                             'C39'     => 'C39',
                                             'EAN5'    => 'EAN5',
                                             'EAN13'   => 'EAN13',
                                             'UPCA'    => 'UPCA',
-                                            'UPCE'    => 'UPCE'
+                                            'UPCE'    => 'UPCE',
+                                             'none'    => trans('admin/settings/general.none'),
                                         ];
                                     @endphp
                                     {{ Form::select('label2_1d_type', $select1DValues, old('label2_1d_type', $setting->label2_1d_type), [ 'class'=>'select2 col-md-4', 'aria-label'=>'label2_1d_type' ]) }}
@@ -177,11 +178,10 @@
                                 <div class="col-md-7">
                                     @php
                                         $select2DValues = [
-                                            'default'    => trans('admin/settings/general.default').' [ '.$setting->barcode_type.' ]',
-                                            'none'       => trans('admin/settings/general.none'),
                                             'QRCODE'     => 'QRCODE',
                                             'DATAMATRIX' => 'DATAMATRIX',
                                             'PDF417'     => 'PDF417',
+                                            'none'       => trans('admin/settings/general.none'),
                                         ];
                                     @endphp
                                     {{ Form::select('label2_2d_type', $select2DValues, old('label2_2d_type', $setting->label2_2d_type), [ 'class'=>'select2 col-md-4', 'aria-label'=>'label2_2d_type' ]) }}
@@ -209,14 +209,16 @@
                                     <p class="help-block">{{ trans('admin/settings/general.label2_2d_target_help') }}</p>
                                 </div>
                             </div>
-
+                            <div class="col-md-9 col-md-offset-3" style="margin-bottom: 10px;">
+                                @include('partials.label2-preview')
+                            </div>
                             <!-- Fields -->
                             <div class="form-group {{ $errors->has('label2_fields') ? 'error' : '' }}">
                                 <div class="col-md-3 text-right">
                                     {{ Form::label('label2_fields', trans('admin/settings/general.label2_fields')) }}
                                 </div>
                                 <div class="col-md-9">
-                                    @include('partials.label2-field-definitions', [ 'name' => 'label2_fields', 'value' => old('label2_fields', $setting->label2_fields), 'customFields' => $customFields ])
+                                    @include('partials.label2-field-definitions', [ 'name' => 'label2_fields', 'value' => old('label2_fields', $setting->label2_fields), 'customFields' => $customFields, 'template' => $setting->label2_template])
                                     {!! $errors->first('label2_fields', '<span class="alert-msg" aria-hidden="true">:message</span>') !!}
                                     <p class="help-block">{{ trans('admin/settings/general.label2_fields_help') }}</p>
                                 </div>
@@ -415,7 +417,7 @@
                         <a class="btn btn-link text-left" href="{{ route('settings.index') }}">{{ trans('button.cancel') }}</a>
                     </div>
                     <div class="text-right col-md-6">
-                        <button type="submit" class="btn btn-primary"><i class="fas fa-check icon-white" aria-hidden="true"></i> {{ trans('general.save') }}</button>
+                        <button type="submit" class="btn btn-primary"><x-icon type="checkmark" /> {{ trans('general.save') }}</button>
                     </div>
 
                 </div>
@@ -426,3 +428,8 @@
     {{Form::close()}}
 
 @stop
+
+@push('js')
+    {{-- Can't use @script here because we're not in a livewire component so let's manually load --}}
+    @livewireScripts
+@endpush
