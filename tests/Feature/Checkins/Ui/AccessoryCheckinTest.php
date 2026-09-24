@@ -3,16 +3,16 @@
 namespace Tests\Feature\Checkins\Ui;
 
 use App\Events\CheckoutableCheckedIn;
+use App\Mail\CheckinAccessoryMail;
 use App\Models\Accessory;
 use App\Models\User;
-use App\Notifications\CheckinAccessoryNotification;
 use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class AccessoryCheckinTest extends TestCase
 {
-    public function testCheckingInAccessoryRequiresCorrectPermission()
+    public function test_checking_in_accessory_requires_correct_permission()
     {
         $accessory = Accessory::factory()->checkedOutToUser()->create();
 
@@ -21,7 +21,16 @@ class AccessoryCheckinTest extends TestCase
             ->assertForbidden();
     }
 
-    public function testAccessoryCanBeCheckedIn()
+    public function test_page_renders()
+    {
+        $accessory = Accessory::factory()->checkedOutToUser()->create();
+
+        $this->actingAs(User::factory()->superuser()->create())
+            ->get(route('accessories.checkin.show', $accessory->checkouts->first()->id))
+            ->assertOk();
+    }
+
+    public function test_accessory_can_be_checked_in()
     {
         Event::fake([CheckoutableCheckedIn::class]);
 
@@ -38,9 +47,9 @@ class AccessoryCheckinTest extends TestCase
         Event::assertDispatched(CheckoutableCheckedIn::class, 1);
     }
 
-    public function testEmailSentToUserIfSettingEnabled()
+    public function test_email_sent_to_user_if_setting_enabled()
     {
-        Notification::fake();
+        Mail::fake();
 
         $user = User::factory()->create();
         $accessory = Accessory::factory()->checkedOutToUser($user)->create();
@@ -53,23 +62,24 @@ class AccessoryCheckinTest extends TestCase
             User::factory()->checkinAccessories()->create(),
             '',
         ));
+        Mail::assertSent(CheckinAccessoryMail::class, function (CheckinAccessoryMail $mail) use ($user) {
+            return $mail->hasTo($user->email);
 
-        Notification::assertSentTo(
-            [$user],
-            function (CheckinAccessoryNotification $notification, $channels) {
-                return in_array('mail', $channels);
-            },
-        );
+        });
     }
 
-    public function testEmailNotSentToUserIfSettingDisabled()
+    public function test_email_not_sent_to_user_if_setting_disabled()
     {
-        Notification::fake();
+        Mail::fake();
 
         $user = User::factory()->create();
         $accessory = Accessory::factory()->checkedOutToUser($user)->create();
 
-        $accessory->category->update(['checkin_email' => false]);
+        $accessory->category->update([
+            'checkin_email' => false,
+            'require_acceptance' => false,
+            'eula_text' => null,
+        ]);
 
         event(new CheckoutableCheckedIn(
             $accessory,
@@ -78,11 +88,8 @@ class AccessoryCheckinTest extends TestCase
             '',
         ));
 
-        Notification::assertNotSentTo(
-            [$user],
-            function (CheckinAccessoryNotification $notification, $channels) {
-                return in_array('mail', $channels);
-            },
-        );
+        Mail::assertNotSent(CheckinAccessoryMail::class, function ($mail) use ($user) {
+            return $mail->hasTo($user->email);
+        });
     }
 }

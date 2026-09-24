@@ -3,7 +3,20 @@
 @slot('header')
 
 {{-- Check that the $snipeSettings variable is set, images are set to be shown, and setup is complete --}}
+<style>
 
+    th, td {
+        vertical-align: top;
+    }
+    hr {
+        display: block;
+        height: 1px;
+        border: 0;
+        border-top: 1px solid #edeff2;
+        margin: 1em 0;
+        padding: 0;
+    }
+</style>
 
 @if (isset($snipeSettings) && ($snipeSettings::setupCompleted()))
 
@@ -21,14 +34,14 @@
         {{-- $snipeSettings->brand = 3 = Logo + Text  --}}
         @if ($snipeSettings->brand == '3')
 
-            <img style="max-height: 100px; vertical-align:middle;" src="{{ \Storage::disk('public')->url(e($snipeSettings->email_logo)) }}">
+            <img style="max-height: 100px; vertical-align:middle;" src="{{ \Storage::disk('public')->url(e($snipeSettings->email_logo)) }}" alt="">
             <br><br>
             {{ $snipeSettings->site_name }}
             <br><br>
 
         {{-- else if branding type is just logo --}}
         @elseif ($snipeSettings->brand == '2')
-           <img style="max-height: 100px; vertical-align:middle;" src="{{ \Storage::disk('public')->url(e($snipeSettings->email_logo)) }}">
+           <img style="max-height: 100px; vertical-align:middle;" src="{{ \Storage::disk('public')->url(e($snipeSettings->email_logo)) }}" alt="">
         @endif
 
     @else
@@ -55,9 +68,9 @@
 @slot('footer')
 @component('mail::footer')
 @if($snipeSettings::setupCompleted())
-© {{ date('Y') }} {{ $snipeSettings->site_name }}. All rights reserved.
+© {{ date('Y') }} {{ $snipeSettings->site_name }}. {{ trans('mail.rights_reserved') }}
 @else
-© {{ date('Y') }} Snipe-IT. All rights reserved.
+© {{ date('Y') }} Snipe-IT. {{ trans('mail.rights_reserved') }}
 @endif
 
 @if ($snipeSettings->privacy_policy_link!='')

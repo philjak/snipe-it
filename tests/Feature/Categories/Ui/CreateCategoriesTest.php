@@ -2,14 +2,13 @@
 
 namespace Tests\Feature\Categories\Ui;
 
-use App\Models\AssetModel;
 use App\Models\Category;
 use App\Models\User;
 use Tests\TestCase;
 
 class CreateCategoriesTest extends TestCase
 {
-    public function testPermissionRequiredToCreateCategories()
+    public function test_permission_required_to_create_categories()
     {
         $this->actingAs(User::factory()->create())
             ->post(route('categories.store'), [
@@ -19,21 +18,38 @@ class CreateCategoriesTest extends TestCase
             ->assertForbidden();
     }
 
-    public function testUserCanCreateCategories()
+    public function test_page_renders()
+    {
+        $this->actingAs(User::factory()->superuser()->create())
+            ->get(route('categories.create'))
+            ->assertOk();
+    }
+
+    public function test_user_can_create_categories()
     {
         $this->assertFalse(Category::where('name', 'Test Category')->exists());
 
         $this->actingAs(User::factory()->superuser()->create())
             ->post(route('categories.store'), [
                 'name' => 'Test Category',
-                'category_type' => 'asset'
+                'category_type' => 'asset',
+                'eula_text' => 'Sample text',
+                'require_acceptance' => '1',
+                'notes' => 'My Note',
             ])
             ->assertRedirect(route('categories.index'));
 
-        $this->assertTrue(Category::where('name', 'Test Category')->exists());
+        $this->assertDatabaseHas('categories', [
+            'name' => 'Test Category',
+            'category_type' => 'asset',
+            'eula_text' => 'Sample text',
+            'notes' => 'My Note',
+            'require_acceptance' => 1,
+            'alert_on_response' => 0,
+        ]);
     }
 
-    public function testUserCannotCreateCategoriesWithInvalidType()
+    public function test_user_cannot_create_categories_with_invalid_type()
     {
         $this->assertFalse(Category::where('name', 'Test Category')->exists());
 
@@ -41,11 +57,10 @@ class CreateCategoriesTest extends TestCase
             ->from(route('categories.create'))
             ->post(route('categories.store'), [
                 'name' => 'Test Category',
-                'category_type' => 'invalid'
+                'category_type' => 'invalid',
             ])
             ->assertRedirect(route('categories.create'));
 
         $this->assertFalse(Category::where('name', 'Test Category')->exists());
     }
-
 }

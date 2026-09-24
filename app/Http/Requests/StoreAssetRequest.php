@@ -2,10 +2,11 @@
 
 namespace App\Http\Requests;
 
+use App\Helpers\Helper;
 use App\Http\Requests\Traits\MayContainCustomFields;
 use App\Models\Asset;
 use App\Models\Company;
-use App\Models\Setting;
+use App\Rules\AssetCannotBeCheckedOutToNondeployableStatus;
 use Carbon\Carbon;
 use Carbon\Exceptions\InvalidFormatException;
 use Illuminate\Support\Facades\Gate;
@@ -13,22 +14,23 @@ use Illuminate\Support\Facades\Gate;
 class StoreAssetRequest extends ImageUploadRequest
 {
     use MayContainCustomFields;
+
     /**
      * Determine if the user is authorized to make this request.
-     *
-     * @return bool
      */
     public function authorize(): bool
     {
-        return Gate::allows('create', new Asset);
+        return Gate::allows('create', Asset::class);
     }
 
     public function prepareForValidation(): void
     {
+        parent::prepareForValidation(); // call ImageUploadRequest thing
         // Guard against users passing in an array for company_id instead of an integer.
         // If the company_id is not an integer then we simply use what was
         // provided to be caught by model level validation later.
-        $idForCurrentUser = is_int($this->company_id)
+        // The use of is_numeric accounts for 1 and '1'.
+        $idForCurrentUser = is_numeric($this->company_id)
             ? Company::getIdForCurrentUser($this->company_id)
             : $this->company_id;
 
@@ -37,30 +39,27 @@ class StoreAssetRequest extends ImageUploadRequest
         $this->merge([
             'asset_tag' => $this->asset_tag ?? Asset::autoincrement_asset(),
             'company_id' => $idForCurrentUser,
-            'assigned_to' => $assigned_to ?? null,
+            'purchase_cost' => $this->filled('purchase_cost') && ! is_float($this->input('purchase_cost')) && preg_match('/^[\d.,]+$/', (string) $this->input('purchase_cost'))
+                ? Helper::ParseCurrency($this->input('purchase_cost'))
+                : $this->input('purchase_cost'),
         ]);
     }
 
     /**
      * Get the validation rules that apply to the request.
-     *
-     * @return array
      */
     public function rules(): array
     {
         $modelRules = (new Asset)->getRules();
 
-        if (Setting::getSettings()->digit_separator === '1.234,56' && is_string($this->input('purchase_cost'))) {
-            // If purchase_cost was submitted as a string with a comma separator
-            // then we need to ignore the normal numeric rules.
-            // Since the original rules still live on the model they will be run
-            // right before saving (and after purchase_cost has been
-            // converted to a float via setPurchaseCostAttribute).
-            $modelRules = $this->removeNumericRulesFromPurchaseCost($modelRules);
-        }
+        // assigned_to / assigned_type are intentionally excluded: they must only
+        // be written via assigned_user / assigned_asset / assigned_location (which
+        // route through checkOut() and produce the required audit-log entry).
+        unset($modelRules['assigned_to'], $modelRules['assigned_type']);
 
         return array_merge(
             $modelRules,
+            ['status_id' => [new AssetCannotBeCheckedOutToNondeployableStatus]],
             parent::rules(),
         );
     }
@@ -80,21 +79,5 @@ class StoreAssetRequest extends ImageUploadRequest
                 // invalid format so validation picks it up later
             }
         }
-    }
-
-    private function removeNumericRulesFromPurchaseCost(array $rules): array
-    {
-        $purchaseCost = $rules['purchase_cost'];
-
-        // If rule is in "|" format then turn it into an array
-        if (is_string($purchaseCost)) {
-            $purchaseCost = explode('|', $purchaseCost);
-        }
-
-        $rules['purchase_cost'] = array_filter($purchaseCost, function ($rule) {
-            return $rule !== 'numeric' && $rule !== 'gte:0';
-        });
-
-        return $rules;
     }
 }

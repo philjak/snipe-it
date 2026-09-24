@@ -3,7 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Accessory;
-use App\Models\AccessoryCheckout;
+use App\Models\Asset;
 use App\Models\Category;
 use App\Models\Location;
 use App\Models\Manufacturer;
@@ -34,10 +34,12 @@ class AccessoryFactory extends Factory
                 $this->faker->randomElement(['Bluetooth', 'Wired']),
                 $this->faker->randomElement(['Keyboard', 'Wired'])
             ),
-            'user_id' => User::factory()->superuser(),
+            'created_by' => User::factory()->superuser(),
             'category_id' => Category::factory()->forAccessories(),
             'model_number' => $this->faker->numberBetween(1000000, 50000000),
             'location_id' => Location::factory(),
+            'default_purchase_cost' => $this->faker->randomFloat(2, 5, 250),
+            'legacy_purchase_date' => $this->faker->dateTimeBetween('-1 years', 'now', date_default_timezone_get())->format('Y-m-d'),
             'qty' => 1,
         ];
     }
@@ -56,7 +58,7 @@ class AccessoryFactory extends Factory
                 },
                 'qty' => 10,
                 'min_amt' => 2,
-                'supplier_id' => Supplier::factory(),
+                'default_supplier_id' => Supplier::factory(),
             ];
         });
     }
@@ -75,7 +77,7 @@ class AccessoryFactory extends Factory
                 },
                 'qty' => 15,
                 'min_amt' => 2,
-                'supplier_id' => Supplier::factory(),
+                'default_supplier_id' => Supplier::factory(),
             ];
         });
     }
@@ -94,7 +96,7 @@ class AccessoryFactory extends Factory
                 },
                 'qty' => 13,
                 'min_amt' => 2,
-                'supplier_id' => Supplier::factory(),
+                'default_supplier_id' => Supplier::factory(),
             ];
         });
     }
@@ -129,7 +131,7 @@ class AccessoryFactory extends Factory
             $accessory->checkouts()->create([
                 'accessory_id' => $accessory->id,
                 'created_at' => Carbon::now(),
-                'user_id' => $user->id,
+                'created_by' => $user->id,
                 'assigned_to' => $user->id,
                 'assigned_type' => User::class,
                 'note' => '',
@@ -144,16 +146,95 @@ class AccessoryFactory extends Factory
         });
     }
 
-    public function checkedOutToUser(User $user = null)
+    public function notRequiringAcceptance()
+    {
+        return $this->afterCreating(function ($accessory) {
+            $accessory->category->update(['require_acceptance' => 0]);
+        });
+    }
+
+    public function checkedOutToUser(?User $user = null)
     {
         return $this->afterCreating(function (Accessory $accessory) use ($user) {
             $accessory->checkouts()->create([
                 'accessory_id' => $accessory->id,
                 'created_at' => Carbon::now(),
-                'user_id' => 1,
+                'created_by' => 1,
                 'assigned_to' => $user->id ?? User::factory()->create()->id,
                 'assigned_type' => User::class,
             ]);
+        });
+    }
+
+    public function checkedOutToUsers(array $users)
+    {
+        return $this->afterCreating(function (Accessory $accessory) use ($users) {
+            foreach ($users as $user) {
+                $accessory->checkouts()->create([
+                    'accessory_id' => $accessory->id,
+                    'created_at' => Carbon::now(),
+                    'created_by' => 1,
+                    'assigned_to' => $user->id,
+                    'assigned_type' => User::class,
+                ]);
+            }
+        });
+    }
+
+    public function checkedOutToAsset(?Asset $asset = null)
+    {
+        return $this->afterCreating(function (Accessory $accessory) use ($asset) {
+            $accessory->checkouts()->create([
+                'accessory_id' => $accessory->id,
+                'created_at' => Carbon::now(),
+                'created_by' => 1,
+                'assigned_to' => $asset->id ?? Asset::factory()->create()->id,
+                'assigned_type' => Asset::class,
+            ]);
+        });
+    }
+
+    public function checkedOutToLocation(?Location $location = null)
+    {
+        return $this->afterCreating(function (Accessory $accessory) use ($location) {
+            $accessory->checkouts()->create([
+                'accessory_id' => $accessory->id,
+                'created_at' => Carbon::now(),
+                'created_by' => 1,
+                'assigned_to' => $location->id ?? Location::factory()->create()->id,
+                'assigned_type' => Location::class,
+            ]);
+        });
+    }
+
+    /**
+     * See ComponentFactory::withInitialAcquisition for docs.
+     */
+    public function withInitialAcquisition(
+        ?Supplier $supplier = null,
+        ?float $unitCost = null,
+        ?string $purchaseDate = null,
+    ) {
+        return $this->afterCreating(function (Accessory $accessory) use ($supplier, $unitCost, $purchaseDate) {
+            $line = $accessory->orderItems()->latest('id')->first();
+            if (! $line) {
+                return;
+            }
+            if ($unitCost !== null) {
+                $line->price = $unitCost;
+                $line->save();
+            }
+            $order = $line->order;
+            if (! $order) {
+                return;
+            }
+            if ($supplier !== null) {
+                $order->supplier_id = $supplier->id;
+            }
+            if ($purchaseDate !== null) {
+                $order->purchase_date = Carbon::parse($purchaseDate);
+            }
+            $order->save();
         });
     }
 }

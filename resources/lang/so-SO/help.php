@@ -15,7 +15,7 @@ return [
 
     'more_info_title' => 'Macluumaad dheeraad ah',
 
-    'audit_help' => 'Saxeexinta sanduuqan waxay wax ka beddeli doontaa diiwaanka hantida si ay u muujiso goobtan cusub. Ka tagista iyada oo aan la hubin waxay si fudud u ogaan doontaa meesha ku jirta diiwaanka hanti dhawrka.<br><',
+    'audit_help' => 'Wuxuu keeni doonaa in la xadido sanduuqan isbedel ku yimaada ra\'samaalka taasoo laga dareemi doono booska cusub. inaan la xadidinna waxay keeneysaa in laga mulaaxadeeyo liiska hubinta. <br><br>ogow haddii laga baxo ra\'samaalka waxba iskama bedeli doono booska qofka ama hantida ama booska laga baxay.',
 
     'assets' => 'Hantidu waa shay lagu raadraaco lambar taxane ah ama sumad hanti ah. Waxay u muuqdaan inay yihiin shay qiimo sare leh marka la aqoonsanayo shay gaar ah.',
 
@@ -23,13 +23,13 @@ return [
 
     'accessories' => 'Qalabyada dheeriga ah waa shay kasta oo aad siiso isticmaaleyaasha laakiin aan lahayn lambar taxane ah (ama aanad dan ka lahayn inaad si gaar ah ula socoto). Tusaale ahaan, jiirarka kombiyuutarka ama kiiboodhka.',
 
-    'companies'     => 'Shirkadaha waxaa loo isticmaali karaa sidii goob aqoonsi oo fudud, ama waxaa loo isticmaali karaa in lagu xaddido muuqaalka hantida, isticmaalayaasha, iwm haddii taageerada buuxda ee shirkadda laga furo goobaha maamulkaaga.',
+    'companies' => 'Shirkadaha waxaa loo isticmaali karaa sidii goob aqoonsi oo fudud, ama waxaa loo isticmaali karaa in lagu xaddido muuqaalka hantida, isticmaalayaasha, iwm haddii taageerada buuxda ee shirkadda laga furo goobaha maamulkaaga.',
 
-    'components'    => 'Qaybuhu waa shay ka mid ah hantida, tusaale ahaan HDD, RAM, iwm.',
+    'components' => 'Qaybuhu waa shay ka mid ah hantida, tusaale ahaan HDD, RAM, iwm.',
 
-    'consumables'   => 'Waxyaalaha la istcimaalay waa shay kasta oo la soo iibsaday oo la isticmaali doono muddo ka dib. Tusaale ahaan, qalin daabacaha ama warqadda koobiyeeyaha.',
+    'consumables' => 'Waxyaalaha la istcimaalay waa shay kasta oo la soo iibsaday oo la isticmaali doono muddo ka dib. Tusaale ahaan, qalin daabacaha ama warqadda koobiyeeyaha.',
 
     'depreciations' => 'Waxaad dejin kartaa qiimo dhimista hantida si aad u qiimayso hantida ku salaysan qiimo-dhaca khadka tooska ah.',
-    
-    'empty_file'    => 'Soodejiyehu wuxuu ogaadaa in faylkani madhan yahay.'
+
+    'empty_file' => 'Soodejiyehu wuxuu ogaadaa in faylkani madhan yahay.',
 ];

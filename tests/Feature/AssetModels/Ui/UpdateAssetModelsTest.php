@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class UpdateAssetModelsTest extends TestCase
 {
-    public function testPermissionRequiredToStoreAssetModel()
+    public function test_permission_required_to_update_asset_model()
     {
         $this->actingAs(User::factory()->create())
             ->put(route('models.update', ['model' => AssetModel::factory()->create()]), [
@@ -21,7 +21,14 @@ class UpdateAssetModelsTest extends TestCase
             ->assertForbidden();
     }
 
-    public function testUserCanEditAssetModels()
+    public function test_page_renders()
+    {
+        $this->actingAs(User::factory()->superuser()->create())
+            ->get(route('models.edit', AssetModel::factory()->create()))
+            ->assertOk();
+    }
+
+    public function test_user_can_edit_asset_models()
     {
         $category = Category::factory()->forAssets()->create();
         $model = AssetModel::factory()->create(['name' => 'Test Model', 'category_id' => $category->id]);
@@ -41,22 +48,22 @@ class UpdateAssetModelsTest extends TestCase
 
     }
 
-    public function testUserCannotChangeAssetModelCategoryType()
+    public function test_user_cannot_change_asset_model_category_type()
     {
         $category = Category::factory()->forAssets()->create();
         $model = AssetModel::factory()->create(['name' => 'Test Model', 'category_id' => $category->id]);
         $this->assertTrue(AssetModel::where('name', 'Test Model')->exists());
 
         $response = $this->actingAs(User::factory()->superuser()->create())
-            ->from(route('models.edit', ['model' => $model->id]))
-            ->put(route('models.update', ['model' => $model]), [
+            ->from(route('models.edit', $model))
+            ->put(route('models.update', $model), [
                 'name' => 'Test Model Edited',
                 'category_id' => Category::factory()->forAccessories()->create()->id,
             ])
             ->assertSessionHasErrors(['category_type'])
             ->assertInvalid(['category_type'])
             ->assertStatus(302)
-            ->assertRedirect(route('models.edit', ['model' => $model->id]));
+            ->assertRedirect(route('models.edit', $model));
 
         $this->followRedirects($response)->assertSee(trans('general.error'));
         $this->assertFalse(AssetModel::where('name', 'Test Model Edited')->exists());

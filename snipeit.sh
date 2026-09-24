@@ -18,8 +18,11 @@
 #         Updated Snipe-IT Install Script            #
 #          Update created by Aaron Myers             #
 # Change log                                         #
+# * verify support for Ubuntu 24.04 -> 25.04         #
+# * add support for linux Mint 21 -> 22 inclusive    #
+# * add support for linux mint 22.1                  #
 # * add support for php8.2, awslinux2, alma 8/9      #
-# * fix rocky8/9 support
+# * fix rocky8/9 support                             #
 # * remove Fedora support because short timelines    #
 # * Added support for CentOS/Rocky 9                 #
 # * Fixed CentOS 7 repository for PHP 7.4            #
@@ -31,6 +34,7 @@
 # * Moved OS check to start of script                #
 # * Fixed timezone awk                               #
 # * Minor display and logging improvements           #
+# * Add Redhat 10.x support                          #
 ######################################################
 
 # Parse arguments
@@ -87,6 +91,7 @@ readonly APP_NAME="snipeit"
 readonly APP_PATH="/var/www/html/$APP_NAME"
 readonly APP_LOG="/var/log/snipeit-install.log"
 readonly COMPOSER_PATH="/home/$APP_USER"
+is_mint=false
 
 progress () {
   spin[0]="-"
@@ -175,11 +180,22 @@ create_user () {
 
   if [[ "$distro" == "Ubuntu" ]] || [[ "$distro" == "Debian" ]] || [[ "$distro" == "Raspbian" ]] ; then
     /usr/sbin/adduser --quiet --disabled-password --gecos 'Snipe-IT User' "$APP_USER"
-    su -c "/usr/sbin/usermod -a -G "$apache_group" "$APP_USER""
   else
-    adduser "$APP_USER"
-    usermod -a -G "$apache_group" "$APP_USER"
+    adduser -c "Snipe-IT User" "$APP_USER"
   fi
+
+  # Add the user to the apache group so the app can write to any files apache
+  # creates (eg, if apache process creates the log, but then a an app-user-owned
+  # cron also tries writing
+  usermod -a -G "$apache_group" "$APP_USER"
+
+  # Now do the reverse -- so apache can write to the log that the user may
+  # have created. This was actively a problem on new installs, hobbling
+  # imports
+  # redefining these variables just for clarity
+  apache_user="$apache_group"
+  app_group="$APP_USER"
+  usermod -a -G "$app_group" "$apache_user"
 }
 
 run_as_app_user () {
@@ -203,7 +219,7 @@ install_composer () {
   fi
 
   if [ "$EXPECTED_SIGNATURE" != "$ACTUAL_SIGNATURE" ]; then
-    >?&2 echo 'ERROR: Invalid composer installer signature'
+    >&2 echo 'ERROR: Invalid composer installer signature'
     exit 1
   fi
 
@@ -224,7 +240,7 @@ install_snipeit () {
   mysql -u root --execute="CREATE DATABASE snipeit;CREATE USER snipeit_dbuser@localhost IDENTIFIED BY '$mysqluserpw'; GRANT ALL PRIVILEGES ON snipeit.* TO snipeit_dbuser@localhost;"
 
   echo -e "\n\n* Cloning Snipe-IT from github to the web directory."
-  log "git clone https://github.com/snipe/snipe-it $APP_PATH" & pid=$!
+  log "git clone https://github.com/grokability/snipe-it $APP_PATH" & pid=$!
   progress
   pushd $APP_PATH
   git checkout master
@@ -305,19 +321,31 @@ rename_default_vhost () {
 }
 
 
-if [[ -f /etc/debian_version || -f /etc/lsb-release ]]; then
-  distro="$(lsb_release -is)"
-  version="$(lsb_release -rs)"
-  codename="$(lsb_release -cs)"
-elif [ -f /etc/os-release ]; then
+# Prefer /etc/os-release because it is the modern cross-distro standard and
+# is always present on every distro this installer supports. Debian 13
+# stopped shipping lsb_release by default (issue #19469), so the old path
+# that shelled out to `lsb_release` produced empty distro/version/codename
+# on a fresh Debian 13 install and broke everything downstream.
+#
+# lsb_release stays as a fallback for very old systems that predate the
+# os-release standard.
+#
+# Order is important below. If /etc/os-release and /etc/centos-release both
+# exist, we are on CentOS 7 and os-release handles it. If only
+# /etc/centos-release exists, we are on CentOS 6 or earlier, which is not
+# parsable, so we assume version 6. /etc/os-release also properly detects
+# Fedora.
+if [ -f /etc/os-release ]; then
   # shellcheck disable=SC1091
   distro="$(source /etc/os-release && echo "$ID")"
   # shellcheck disable=SC1091
   version="$(source /etc/os-release && echo "$VERSION_ID")"
-  #Order is important here.  If /etc/os-release and /etc/centos-release exist, we're on centos 7.
-  #If only /etc/centos-release exist, we're on centos6(or earlier).  Centos-release is less parsable,
-  #so lets assume that it's version 6 (Plus, who would be doing a new install of anything on centos5 at this point..)
-  #/etc/os-release properly detects fedora
+  # shellcheck disable=SC1091
+  codename="$(source /etc/os-release && echo "$VERSION_CODENAME")"
+elif [[ -f /etc/debian_version || -f /etc/lsb-release ]]; then
+  distro="$(lsb_release -is)"
+  version="$(lsb_release -rs)"
+  codename="$(lsb_release -cs)"
 elif [ -f /etc/centos-release ]; then
   distro="centos"
   version="6"
@@ -347,6 +375,13 @@ case $distro in
     apache_group=www-data
     apachefile=/etc/apache2/sites-available/$APP_NAME.conf
     ;;
+  *linuxmint*)
+    echo "  The installer has detected $distro version $version codename $codename."
+    distro=Ubuntu
+    is_mint=true
+    apache_group=www-data
+    apachefile=/etc/apache2/sites-available/$APP_NAME.conf
+    ;;
   *raspbian*)
     echo "  The installer has detected $distro version $version codename $codename."
     distro=Raspbian
@@ -359,7 +394,7 @@ case $distro in
     apache_group=www-data
     apachefile=/etc/apache2/sites-available/$APP_NAME.conf
     ;;
-  *amzn*|*redhat*|*alma*|*rhel*|*rocky*)
+  *amzn*|*redhat*|*alma*|*rhel*|*rocky*|*centos*)
     echo "  The installer has detected $distro version $version."
     distro=Centos
     apache_group=apache
@@ -412,7 +447,44 @@ set_dbpass () {
 
 case $distro in
   Debian)
-    if [[ "$version" =~ ^12 ]]; then
+    if [[ "$version" =~ ^13 ]]; then
+        # Install for Debian 13.x
+        set_fqdn
+        set_dbpass
+        tzone=$(timedatectl show --property=Timezone --value)
+
+        echo "* Adding PHP repository."
+        log "apt-get install -y apt-transport-https lsb-release ca-certificates"
+        log "wget -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg"
+        echo "deb https://packages.sury.org/php/ $codename main" > /etc/apt/sources.list.d/php.list
+
+        echo -n "* Updating installed packages."
+        log "apt-get update && apt-get -y upgrade" & pid=$!
+        progress
+
+        echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
+        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.4 php8.4  php8.4-curl php8.4-mysql php8.4-gd php8.4-ldap php8.4-zip php8.4-mbstring php8.4-xml php8.4-bcmath curl git unzip"
+        install_packages
+
+        echo "* Configuring Apache."
+        create_virtualhost
+        /usr/sbin/a2enmod rewrite
+        /usr/sbin/a2ensite $APP_NAME.conf
+        rename_default_vhost
+
+        set_hosts
+
+        install_snipeit
+
+        echo "* Restarting Apache httpd."
+        /usr/sbin/service apache2 restart
+
+        echo "* Clearing cache and setting final permissions."
+        chmod 777 -R $APP_PATH/storage/framework/cache/
+        run_as_app_user php $APP_PATH/artisan cache:clear
+        chmod 775 -R $APP_PATH/storage/
+
+    elif [[ "$version" =~ ^12 ]]; then
         # Install for Debian 12.x
         set_fqdn
         set_dbpass
@@ -428,7 +500,7 @@ case $distro in
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2 php8.2-mcrypt php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
+        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2  php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
         install_packages
 
         echo "* Configuring Apache."
@@ -465,7 +537,7 @@ case $distro in
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2 php8.2-mcrypt php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
+        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2  php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
         install_packages
 
         echo "* Configuring Apache."
@@ -502,7 +574,7 @@ case $distro in
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2 php8.2-mcrypt php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
+        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2  php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
         install_packages
 
         echo "* Configuring Apache."
@@ -533,7 +605,7 @@ case $distro in
   ;;
   Ubuntu)
     if [ "${version//./}" -ge "2304" ]; then
-        # Install for Ubuntu 23.04 and 23.10
+        # Install for Ubuntu 23.04 and above
         set_fqdn
         set_dbpass
         tzone=$(cat /etc/timezone)
@@ -543,7 +615,58 @@ case $distro in
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="cron mariadb-server mariadb-client apache2 libapache2-mod-php php php-mcrypt php-curl php-mysql php-gd php-ldap php-zip php-mbstring php-xml php-bcmath curl git unzip"
+        PACKAGES="cron mariadb-server mariadb-client apache2 libapache2-mod-php php php-curl php-mysql php-gd php-ldap php-zip php-mbstring php-xml php-bcmath curl git unzip wget"
+        install_packages
+
+        echo "* Configuring Apache."
+        create_virtualhost
+        log "phpenmod mcrypt"
+        log "phpenmod mbstring"
+        log "a2enmod rewrite"
+        log "a2ensite $APP_NAME.conf"
+        rename_default_vhost
+
+        set_hosts
+
+        echo "* Starting MariaDB."
+        log "systemctl start mariadb.service"
+
+        install_snipeit
+
+        echo "* Restarting Apache httpd."
+        log "systemctl restart apache2"
+
+        echo "* Clearing cache and setting final permissions."
+        chmod 777 -R $APP_PATH/storage/framework/cache/
+        log "run_as_app_user php $APP_PATH/artisan cache:clear"
+        chmod 775 -R $APP_PATH/storage/
+    elif [[ "${is_mint}" == "true" ]]; then
+        # Install for Linux Mint 21.2 - 22.1
+
+        if [[ "${version//.*/}" -eq "22" ]] ; then
+            ubuntu_codename=noble
+        elif [[ "${version//.*/}" -eq "21" ]]; then
+            ubuntu_codename=jammy
+        else
+            echo "Unsupported Linux Mint version. Version found: $version"
+            exit 1
+        fi
+
+        set_fqdn
+        set_dbpass
+        tzone=$(cat /etc/timezone)
+
+        echo "* Set up Ondrej PHP repository"
+        echo "# Odrej PHP repo for ability to choose non-distro PHP versions" > /etc/apt/sources.list.d/ppa_ondrej_php_$ubuntu_codename.list
+        echo "deb http://ppa.launchpad.net/ondrej/php/ubuntu $ubuntu_codename main" >> /etc/apt/sources.list.d/ppa_ondrej_php_$ubuntu_codename.list
+        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 4F4EA0AAE5267A6C
+
+        echo -n "* Updating installed packages."
+        log "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y upgrade" & pid=$!
+        progress
+
+        echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
+        PACKAGES="cron mariadb-server mariadb-client apache2 libapache2-mod-php8.3 php8.3  php8.3-curl php8.3-mysql php8.3-gd php8.3-ldap php8.3-zip php8.3-mbstring php8.3-xml php8.3-bcmath php8.3-cli curl git unzip"
         install_packages
 
         echo "* Configuring Apache."
@@ -584,7 +707,7 @@ case $distro in
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="cron mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2 php8.2-mcrypt php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
+        PACKAGES="cron mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2  php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
         install_packages
 
         echo "* Configuring Apache."
@@ -628,7 +751,7 @@ case $distro in
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="cron mariadb-server mariadb-client apache2 libapache2-mod-php8.28.2 php8.2 php8.2-mcrypt php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
+        PACKAGES="cron mariadb-server mariadb-client apache2 libapache2-mod-php8.28.2 php8.2  php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
         install_packages
 
         echo "* Configuring Apache."
@@ -688,12 +811,11 @@ EOL
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2 php8.2-mcrypt php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
+        PACKAGES="mariadb-server mariadb-client apache2 libapache2-mod-php8.2 php8.2  php8.2-curl php8.2-mysql php8.2-gd php8.2-ldap php8.2-zip php8.2-mbstring php8.2-xml php8.2-bcmath curl git unzip"
         install_packages
 
         echo "* Configuring Apache."
         create_virtualhost
-        log "phpenmod mcrypt"
         log "phpenmod mbstring"
         log "a2enmod rewrite"
         log "a2ensite $APP_NAME.conf"
@@ -728,7 +850,7 @@ EOL
         amazon-linux-extras install -y php8.2
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="httpd mariadb-server git unzip php php-mysqlnd php-bcmath php-embedded php-gd php-mbstring php-mcrypt php-ldap php-json php-simplexml php-process php-zip  php-sodium"
+        PACKAGES="httpd mariadb-server git unzip php php-mysqlnd php-bcmath php-embedded php-gd php-mbstring php-ldap php-json php-simplexml php-process php-zip  php-sodium"
         install_packages
 
         echo "* Configuring Apache."
@@ -769,7 +891,7 @@ EOL
         log "yum-config-manager --enable remi-php82"
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="httpd mariadb-server git unzip php php-mysqlnd php-bcmath php-embedded php-gd php-mbstring php-mcrypt php-ldap php-json php-simplexml php-process php-zip"
+        PACKAGES="httpd mariadb-server git unzip php php-mysqlnd php-bcmath php-embedded php-gd php-mbstring php-ldap php-json php-simplexml php-process php-zip"
         install_packages
 
         echo "* Configuring Apache."
@@ -812,7 +934,7 @@ EOL
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB and other requirements."
-        PACKAGES="httpd mariadb-server git unzip php php-mysqlnd php-bcmath php-embedded php-gd php-mbstring php-mcrypt php-ldap php-json php-simplexml php-process php-zip"
+        PACKAGES="httpd mariadb-server git unzip php php-mysqlnd php-bcmath php-embedded php-gd php-mbstring php-ldap php-json php-simplexml php-process php-zip"
         install_packages
 
         echo "* Configuring Apache."
@@ -852,6 +974,53 @@ EOL
         progress
         log "rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-remi.el9"
         log "dnf -y module enable php:remi-8.2" & pid=$!
+        progress
+
+        echo "* Installing Apache httpd, PHP, MariaDB, and other requirements."
+        PACKAGES="httpd mariadb-server git unzip php-mysqlnd php-bcmath php-cli php-embedded php-gd php-mbstring php-ldap php-simplexml php-process php-sodium php-pecl-zip php-fpm"
+        install_packages
+
+        echo "* Configuring Apache."
+        create_virtualhost
+
+        set_hosts
+
+        echo "* Setting MariaDB to start on boot and starting MariaDB."
+        log "systemctl enable mariadb.service"
+        log "systemctl start mariadb.service"
+
+        install_snipeit
+
+        set_firewall & pid=$!
+        progress
+
+        echo "* Setting Apache httpd to start on boot and starting service."
+        log "systemctl enable httpd.service"
+        log "systemctl restart httpd.service"
+
+        echo "* Setting php-fpm to start on boot and starting service."
+        log "systemctl enable php-fpm.service"
+        log "systemctl restart php-fpm.service"
+
+        echo "* Clearing cache and setting final permissions."
+        chmod 777 -R $APP_PATH/storage/framework/cache/
+        log "run_as_app_user php $APP_PATH/artisan cache:clear"
+        chmod 775 -R $APP_PATH/storage/
+
+        set_selinux
+      elif [[ "$version" =~ ^10 ]]; then
+        # Install for CentOS/Alma/Redhat 10
+        set_fqdn
+        set_dbpass
+        tzone=$(timedatectl | grep "Time zone" | awk 'BEGIN { FS"("}; {print $3}');
+
+        echo "* Adding EPEL-release repository."
+        log "dnf -y install wget epel-release" & pid=$!
+        progress
+        log "yum -y install https://rpms.remirepo.net/enterprise/remi-release-10.rpm" & pid=$!
+        progress
+        log "rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-remi.el10"
+        log "dnf -y module enable php:remi-10" & pid=$!
         progress
 
         echo "* Installing Apache httpd, PHP, MariaDB, and other requirements."
@@ -932,7 +1101,7 @@ case $setupmail in
 
     echo -n "  From name:"
     read -r mailfromname
-    sed -i "s|^\\(MAIL_FROM_NAME=\\).*|\\1$mailfromname|" "$APP_PATH/.env"
+    sed -i  "s|^\\(MAIL_FROM_NAME=\\).*|\\1\\'$mailfromname\\'|" "$APP_PATH/.env"
 
     echo -n "  Reply to address:"
     read -r mailreplytoaddr
@@ -940,7 +1109,7 @@ case $setupmail in
 
     echo -n "  Reply to name:"
     read -r mailreplytoname
-    sed -i "s|^\\(MAIL_REPLYTO_NAME=\\).*|\\1$mailreplytoname|" "$APP_PATH/.env"
+    sed -i "s|^\\(MAIL_REPLYTO_NAME=\\).*|\\1\\'$mailreplytoname\\'|" "$APP_PATH/.env"
     setupmail="yes"
     ;;
   [nN] | [n|N][O|o] )
